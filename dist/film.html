@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>一个微型 Transformer 的全部内部 · 讲解动画</title>
+<style>
+  :root{
+    --paper:#f7f2e9; --card:#fffdf9; --ink:#2b2723; --ink2:#6b6259;
+    --jade:#2f7d63; --jade2:#3d8f9c; --rust:#b85c38; --line:#e2d9c8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font:15px/1.7 "Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased}
+  .wrap{max-width:1500px;margin:0 auto;padding:26px 22px 60px}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:16px}
+  h1{font-size:22px;margin:0;letter-spacing:.5px}
+  .meta{color:var(--ink2);font-size:13px}
+  .meta b{color:var(--jade);font-weight:600}
+  .grid{display:grid;grid-template-columns:1fr 328px;gap:18px;align-items:start}
+  @media (max-width:1100px){.grid{grid-template-columns:1fr}}
+
+  .stage{position:relative;background:var(--card);border:1px solid var(--line);
+    border-radius:14px;overflow:hidden;box-shadow:0 1px 2px rgba(60,50,30,.06)}
+  .vwrap{position:relative;background:#0d0c0a}
+  video{display:block;width:100%;background:#0d0c0a}
+  .sub{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);
+    max-width:86%;text-align:center;background:rgba(255,253,249,.92);color:var(--ink);
+    font-size:19px;line-height:1.5;padding:8px 16px;border-radius:12px;
+    pointer-events:none;box-shadow:0 1px 6px rgba(40,30,20,.12)}
+  .sub:empty{display:none}
+
+  .bar{display:flex;align-items:center;gap:10px;padding:10px 12px;border-top:1px solid var(--line);flex-wrap:wrap}
+  button{font:inherit;color:var(--ink);background:#fff;border:1px solid var(--line);
+    border-radius:8px;padding:6px 12px;cursor:pointer;transition:.12s}
+  button:hover{border-color:var(--jade);color:var(--jade)}
+  button.on{background:var(--jade);border-color:var(--jade);color:#fff}
+  .sp{flex:1}
+  .clock{font-variant-numeric:tabular-nums;color:var(--ink2);font-size:13px;min-width:96px;text-align:right}
+  input[type=range]{flex:1;min-width:160px;accent-color:var(--jade);height:22px}
+  .hint{color:var(--ink2);font-size:12.5px;margin-top:10px}
+  kbd{background:#fff;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;
+    padding:0 5px;font:12px/1.5 ui-monospace,Consolas,monospace}
+
+  .toc{background:var(--card);border:1px solid var(--line);border-radius:14px;
+    max-height:78vh;overflow:auto;padding:10px 8px;position:sticky;top:16px}
+  .act{font-size:12px;color:var(--jade2);letter-spacing:1px;padding:10px 8px 4px;font-weight:600}
+  .ch{display:flex;align-items:center;gap:9px;width:100%;text-align:left;background:none;
+    border:0;border-left:3px solid transparent;border-radius:0 8px 8px 0;padding:6px 8px}
+  .ch:hover{background:#f4efe4}
+  .ch.on{border-left-color:var(--jade);background:#eef4ef}
+  .ch .no{font-variant-numeric:tabular-nums;color:var(--ink2);font-size:12px;min-width:20px}
+  .ch .tt{flex:1;font-size:13.5px;line-height:1.45}
+  .ch .du{color:var(--ink2);font-size:11.5px;font-variant-numeric:tabular-nums}
+  .legend{padding:8px 8px 4px;color:var(--ink2);font-size:12px;line-height:1.6}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>一个微型 Transformer 的全部内部</h1>
+    <span class="meta">8:56 · 1920×1080 · 24fps · 28 个场景 ·
+      <b>所有数字均为真实运算</b>（约 2.8k 参数模型，页面内训练 900 步）</span>
+  </header>
+
+  <div class="grid">
+    <div class="stage">
+      <div class="vwrap">
+        <video id="v" src="llm-narration.mp4" preload="metadata" playsinline></video>
+        <div class="sub" id="sub"></div>
+      </div>
+      <div class="bar">
+        <button id="pp" title="空格">▶ 播放</button>
+        <button id="b10" title="←">−10s</button>
+        <button id="f10" title="→">+10s</button>
+        <input type="range" id="seek" min="0" max="536400" value="0" step="1">
+        <span class="clock" id="clock">0:00 / 8:56</span>
+        <button id="sp" title="S">1.0×</button>
+        <button id="fs" title="F">全屏</button>
+      </div>
+      <div class="hint">
+        快捷键 <kbd>空格</kbd>播放/暂停 · <kbd>←</kbd><kbd>→</kbd>±10s · <kbd>F</kbd>全屏 · <kbd>S</kbd>倍速 ·
+        点右侧章节跳转。字幕由脚本台词直接渲染，离线可用。
+      </div>
+    </div>
+
+    <nav class="toc" id="toc">
+      <div class="legend">完整覆盖：原理 → 一次推理 → 真实张量 → 训练闭环。<br>点击任意场景跳转。</div>
+
+    <div class="act">第一幕 · 原理</div>
+    <button class="ch" data-t="0" data-i="0">
+      <span class="no">00</span>
+      <span class="tt">大语言模型的内部，到底在算什么？</span>
+      <span class="du">0:00</span>
+    </button><button class="ch" data-t="12.6" data-i="1">
+      <span class="no">01</span>
+      <span class="tt">① 一切都从 Token 开始</span>
+      <span class="du">0:13</span>
+    </button><button class="ch" data-t="33.7" data-i="2">
+      <span class="no">02</span>
+      <span class="tt">② Embedding：把 id 变成向量</span>
+      <span class="du">0:34</span>
+    </button><button class="ch" data-t="56.5" data-i="3">
+      <span class="no">03</span>
+      <span class="tt">③ 位置编码 RoPE</span>
+      <span class="du">0:57</span>
+    </button><button class="ch" data-t="73.4" data-i="4">
+      <span class="no">04</span>
+      <span class="tt">④ 一层里有什么</span>
+      <span class="du">1:13</span>
+    </button><button class="ch" data-t="96.7" data-i="5">
+      <span class="no">05</span>
+      <span class="tt">⑤ RMSNorm：先把数值拉回同一尺度</span>
+      <span class="du">1:37</span>
+    </button><button class="ch" data-t="109.3" data-i="6">
+      <span class="no">06</span>
+      <span class="tt">⑥ Q / K / V：三个视角看同一个 token</span>
+      <span class="du">1:49</span>
+    </button><button class="ch" data-t="126.6" data-i="7">
+      <span class="no">07</span>
+      <span class="tt">⑦ 注意力：缩放点积 + 因果掩码</span>
+      <span class="du">2:07</span>
+    </button><button class="ch" data-t="143.6" data-i="8">
+      <span class="no">08</span>
+      <span class="tt">⑧ 这张热力图就是真实权重</span>
+      <span class="du">2:24</span>
+    </button><button class="ch" data-t="162.3" data-i="9">
+      <span class="no">09</span>
+      <span class="tt">⑨ 加权取 V，再叠加回原向量</span>
+      <span class="du">2:42</span>
+    </button><button class="ch" data-t="181.4" data-i="10">
+      <span class="no">10</span>
+      <span class="tt">⑩ MLP：每个位置各自做一次变换</span>
+      <span class="du">3:01</span>
+    </button><button class="ch" data-t="202.4" data-i="11">
+      <span class="no">11</span>
+      <span class="tt">⑪ 64 个神经元的真实激活值</span>
+      <span class="du">3:22</span>
+    </button>
+
+    <div class="act">第二幕 · 走完一次推理</div>
+    <button class="ch" data-t="218.3" data-i="12">
+      <span class="no">12</span>
+      <span class="tt">⑫ 同样的结构，再来一遍</span>
+      <span class="du">3:38</span>
+    </button><button class="ch" data-t="235" data-i="13">
+      <span class="no">13</span>
+      <span class="tt">⑬ 输出头：把向量投影回词表</span>
+      <span class="du">3:55</span>
+    </button><button class="ch" data-t="250.7" data-i="14">
+      <span class="no">14</span>
+      <span class="tt">⑭ Softmax：分数变成概率</span>
+      <span class="du">4:11</span>
+    </button><button class="ch" data-t="269.4" data-i="15">
+      <span class="no">15</span>
+      <span class="tt">⑮ Top-p 采样：怎么挑出那个 token</span>
+      <span class="du">4:29</span>
+    </button><button class="ch" data-t="286.7" data-i="16">
+      <span class="no">16</span>
+      <span class="tt">⑯ 自回归：把它接回去，再来一次</span>
+      <span class="du">4:47</span>
+    </button>
+
+    <div class="act">第三幕 · 这些数是真的</div>
+    <button class="ch" data-t="307.6" data-i="17">
+      <span class="no">17</span>
+      <span class="tt">⑰ 把中间张量一个个摊开</span>
+      <span class="du">5:08</span>
+    </button><button class="ch" data-t="337.8" data-i="18">
+      <span class="no">18</span>
+      <span class="tt">⑱ 并且可以和独立实现对上</span>
+      <span class="du">5:38</span>
+    </button>
+
+    <div class="act">第四幕 · 它怎么学会的</div>
+    <button class="ch" data-t="358.5" data-i="19">
+      <span class="no">19</span>
+      <span class="tt">⑲ 训练：一个闭环，跑上千万次</span>
+      <span class="du">5:59</span>
+    </button><button class="ch" data-t="376.6" data-i="20">
+      <span class="no">20</span>
+      <span class="tt">⑳ 采样训练批次</span>
+      <span class="du">6:17</span>
+    </button><button class="ch" data-t="395.7" data-i="21">
+      <span class="no">21</span>
+      <span class="tt">㉑ 前向传播</span>
+      <span class="du">6:36</span>
+    </button><button class="ch" data-t="408.6" data-i="22">
+      <span class="no">22</span>
+      <span class="tt">㉒ 交叉熵损失</span>
+      <span class="du">6:49</span>
+    </button><button class="ch" data-t="430.7" data-i="23">
+      <span class="no">23</span>
+      <span class="tt">㉓ 反向传播：把责任分回去</span>
+      <span class="du">7:11</span>
+    </button><button class="ch" data-t="451.8" data-i="24">
+      <span class="no">24</span>
+      <span class="tt">㉔ 梯度裁剪：防止一步走飞</span>
+      <span class="du">7:32</span>
+    </button><button class="ch" data-t="470" data-i="25">
+      <span class="no">25</span>
+      <span class="tt">㉕ AdamW：真正改动权重</span>
+      <span class="du">7:50</span>
+    </button><button class="ch" data-t="491.8" data-i="26">
+      <span class="no">26</span>
+      <span class="tt">㉖ 一步完成，然后重复</span>
+      <span class="du">8:12</span>
+    </button>
+
+    <div class="act">尾声</div>
+    <button class="ch" data-t="512.5" data-i="27">
+      <span class="no">27</span>
+      <span class="tt">整个流程，到这里就闭环了</span>
+      <span class="du">8:33</span>
+    </button>
+    </nav>
+  </div>
+</div>
+
+<script>
+var LINES = [{"a":0,"z":5262,"text":"大语言模型的内部，到底在算什么？"},{"a":5292,"z":12570,"text":"接下来，我们把它从原理到训练，一步步拆开看。"},{"a":12600,"z":21010,"text":"模型看不懂文字。第一步是把文字切成 token —— 每个 token 对应一个整数 id。"},{"a":21040,"z":28184,"text":"例子输入 \"1592\"，被切成 4 个 token：1、5、9、2。"},{"a":28214,"z":33670,"text":"整个词表只有 12 个符号；真实的模型词表有几万到十几万个。"},{"a":33700,"z":42790,"text":"拿 id 去查一张表 E，得到一个 32 维的向量。"},{"a":42820,"z":50542,"text":"这张表是训练出来的：语义相近的 token，向量也会比较接近。"},{"a":50572,"z":56470,"text":"每一行代表一个 token 的初始含义，32 个数字就是它在空间里的坐标。"},{"a":56500,"z":63230,"text":"注意力本身是「无序」的：只给 token，模型分不清 \"1592\" 和 \"2915\"。"},{"a":63260,"z":68976,"text":"RoPE 把位置信息「旋转」进 Q 和 K —— 第 t 个位置转 t 个角度。"},{"a":69006,"z":73370,"text":"这样两个 token 的内积就自然带上了「相对距离」的信息。"},{"a":73400,"z":82224,"text":"Transformer 由若干层堆叠而成，这里用了 2 层。"},{"a":82254,"z":90612,"text":"每层干两件事：先让 token 之间交换信息（注意力），再各自做一次非线性加工（MLP）。"},{"a":90642,"z":96670,"text":"两件事外面都套了残差连接，前面还有 RMSNorm 负责稳定数值。"},{"a":96700,"z":102718,"text":"每层开始前先归一化：除以均方根，再乘一个可学习的增益 g。"},{"a":102748,"z":109270,"text":"不做这一步，数值会在层与层之间越滚越大，训练根本稳不住。"},{"a":109300,"z":115498,"text":"每个 token 的向量乘上三个权重矩阵，得到 Q、K、V。"},{"a":115528,"z":121380,"text":"Q 是「我在找什么」，K 是「我是什么」，V 是「我能提供什么」。"},{"a":121410,"z":126570,"text":"注意力就是用 Q 去匹配所有 K，再按匹配度加权取 V。"},{"a":126600,"z":132690,"text":"把 Q 和 K 做内积、除以 √d_h 缩放，得到一张分数表。"},{"a":132720,"z":138810,"text":"再用下三角掩码把「未来」遮掉 —— 这就是因果注意力，只能看已生成的部分。"},{"a":138840,"z":143570,"text":"最后 softmax 成概率，每一行加起来正好等于 1。"},{"a":143600,"z":150676,"text":"格子越深，说明这个位置的 token 被「关注」得越多。"},{"a":150706,"z":157034,"text":"形状是三角的，因为每个位置只能看到自己和前面的位置。"},{"a":157064,"z":162270,"text":"这些数字不是画出来的 —— 它们来自刚才那次真实的前向计算。"},{"a":162300,"z":169910,"text":"用概率给所有 V 加权求和，得到注意力这一路的输出。"},{"a":169940,"z":176022,"text":"然后把输出加回原来的 x —— 这就是残差连接。"},{"a":176052,"z":181370,"text":"残差让梯度能直接流回浅层，是深层网络能训起来的关键。"},{"a":181400,"z":189770,"text":"把 32 维升到 64 维，过一层 GELU 激活，再降回 32 维。"},{"a":189800,"z":196490,"text":"这里没有任何 token 之间的交流 —— 它是逐位置独立进行的。"},{"a":196520,"z":202370,"text":"一句话总结：注意力负责横向传信息，MLP 负责纵向做加工。"},{"a":202400,"z":209048,"text":"每个球是一个隐层神经元，大小和颜色是它这次的真实激活值。"},{"a":209078,"z":213818,"text":"可以看到只有一部分神经元被点亮 —— 这就是稀疏激活。"},{"a":213848,"z":218270,"text":"大模型里这个隐层要宽得多，但原理完全相同。"},{"a":218300,"z":223948,"text":"第 1 层输出后，第 2 层用完全相同的结构再算一遍。"},{"a":223978,"z":229960,"text":"真实的模型会堆几十到上百层，每一层的流程都和我们刚看到的一样。"},{"a":229990,"z":234970,"text":"到这里，25 个原子步骤里的前 20 步已经走完。"},{"a":235000,"z":241250,"text":"最后再做一次 RMSNorm，然后乘上输出矩阵 W_lm。"},{"a":241280,"z":246588,"text":"它把 32 维的向量，投影成词表大小 12 的「打分」—— logits。"},{"a":246618,"z":250670,"text":"分数越高，模型越认为下一个 token 是它。"},{"a":250700,"z":258524,"text":"softmax 把 logits 变成概率分布：全部非负，加起来等于 1。"},{"a":258554,"z":264508,"text":"温度 T 控制分布的「陡峭程度」—— T 越小越保守，越大越随机。"},{"a":264538,"z":269370,"text":"到这里，模型才第一次给出「下一个词可能是谁」的答案。"},{"a":269400,"z":275944,"text":"Top-p 按概率从高到低累加，累计超过阈值就把剩下的截断。"},{"a":275974,"z":282172,"text":"在保留下来的候选里按概率随机抽一个 —— 所以同样的输入，输出可以不同。"},{"a":282202,"z":286670,"text":"抽出的 token 就是这次的预测结果。"},{"a":286700,"z":295448,"text":"把刚生成的 token 追加到序列末尾，然后整段重新跑一遍。"},{"a":295478,"z":302136,"text":"这就是「自回归」—— 一次生成一个 token，循环下去，直到结束符。"},{"a":302166,"z":307570,"text":"所谓大模型写字，本质就是这个循环重复了几百上千次。"},{"a":307600,"z":317838,"text":"刚才看到的每个数字，都来自浏览器里这次真实的前向计算。"},{"a":317868,"z":328710,"text":"以固定输入 \"1592\" 为例：Embedding 查表、RMSNorm、QKV、注意力分数、softmax、MLP 激活、logits —— 逐步摊开。"},{"a":328740,"z":337770,"text":"其中注意力那一组最能说明问题：先算原始分数，再减最大值，再归一化。"},{"a":337800,"z":345636,"text":"同一套权重，命令行里的另一份独立实现（同样用 Node 跑）算出的参考值，与页面逐项比对。"},{"a":345666,"z":353088,"text":"13 组张量，最大绝对误差 0 —— 说明页面上的数确实是算出来的，不是写死的。"},{"a":353118,"z":358470,"text":"面板上那两行自检，就是每次刷新都现场跑一遍这个比对。"},{"a":358500,"z":364986,"text":"到这里模型还是「随机」的 —— 它的权重是随机初始化的。"},{"a":365016,"z":371502,"text":"训练做的事很朴素：让它预测下一个 token，猜错了就调整权重，然后重复。"},{"a":371532,"z":376570,"text":"接下来看这个闭环的每一步。"},{"a":376600,"z":384974,"text":"从语料里切一个窗口：上面一行是输入 x，下面一行是目标 y。"},{"a":385004,"z":391086,"text":"y 就是 x 往左移一格 —— 「下一个 token」这个监督信号直接来自序列本身。"},{"a":391116,"z":395670,"text":"所以不需要人工标注，任何文本都是训练数据。"},{"a":395700,"z":402120,"text":"和推理时完全相同的计算路径：嵌入、注意力、MLP、输出头。"},{"a":402150,"z":408570,"text":"训练和推理共用同一条前向路径，区别只在训练时我们记住了中间结果。"},{"a":408600,"z":416084,"text":"把正确 token 的概率取负对数，就是这一回的损失。"},{"a":416114,"z":424040,"text":"概率越接近 1，损失越接近 0；随机初始化的模型大约在 ln(12) ≈ 2.48 附近。"},{"a":424070,"z":430670,"text":"一个数字就概括了「这次猜得有多离谱」，接下来要让它变小。"},{"a":430700,"z":437422,"text":"要对权重负责，就得知道每个权重把损失推高了多少 —— 这就是梯度。"},{"a":437452,"z":445018,"text":"从损失出发，用链式法则一层层往回算。柱子的高度就是各块参数真实的梯度范数。"},{"a":445048,"z":451770,"text":"这个过程是手写的：前向、反向、每一层的转置乘法，都在 model.js 里。"},{"a":451800,"z":460142,"text":"如果梯度整体太大，一次更新就可能把模型推飞。"},{"a":460172,"z":465602,"text":"做法很简单：梯度范数超过阈值，就整体等比缩放回去。"},{"a":465632,"z":469970,"text":"画面上的 ‖g‖ 和裁剪系数，都是这一步的真实值。"},{"a":470000,"z":477382,"text":"AdamW 用两个统计量来决定每一步走多大：梯度的滑动平均，和梯度平方的滑动平均。"},{"a":477412,"z":484794,"text":"前者提供惯性，后者让每个参数有各自的学习率；再额外做一点权重衰减。"},{"a":484824,"z":491770,"text":"画面上的立方体就是 W₁ 的真实权重，橙色小块是真实的一阶矩（动量）。"},{"a":491800,"z":499636,"text":"一次迭代结束，权重已经变了。回到第一步，换一个批次再来。"},{"a":499666,"z":506674,"text":"这条曲线是真实跑出来的 loss：每完成一次迭代就记录一个点。"},{"a":506704,"z":512470,"text":"训练就是把这个闭环重复成千上万次 —— 大模型要跑几百万次。"},{"a":512500,"z":522508,"text":"原理、推理、训练 —— 三者用的是同一套代码、同一份权重、同一套数学。"},{"a":522538,"z":531112,"text":"语料是六个三字符词拼成的短语；模型从随机初始化出发，真把下一字符的预测准确率练到了八成以上。"},{"a":531142,"z":536400,"text":"大模型的规模大了几个数量级，但骨架就是刚才这些。"}];
+var CHAPTERS = [{"i":0,"t":0,"dur":12.6,"act":"第一幕 · 原理","title":"大语言模型的内部，到底在算什么？"},{"i":1,"t":12.6,"dur":21.1,"act":"第一幕 · 原理","title":"① 一切都从 Token 开始"},{"i":2,"t":33.7,"dur":22.8,"act":"第一幕 · 原理","title":"② Embedding：把 id 变成向量"},{"i":3,"t":56.5,"dur":16.9,"act":"第一幕 · 原理","title":"③ 位置编码 RoPE"},{"i":4,"t":73.4,"dur":23.3,"act":"第一幕 · 原理","title":"④ 一层里有什么"},{"i":5,"t":96.7,"dur":12.6,"act":"第一幕 · 原理","title":"⑤ RMSNorm：先把数值拉回同一尺度"},{"i":6,"t":109.3,"dur":17.3,"act":"第一幕 · 原理","title":"⑥ Q / K / V：三个视角看同一个 token"},{"i":7,"t":126.6,"dur":17,"act":"第一幕 · 原理","title":"⑦ 注意力：缩放点积 + 因果掩码"},{"i":8,"t":143.6,"dur":18.7,"act":"第一幕 · 原理","title":"⑧ 这张热力图就是真实权重"},{"i":9,"t":162.3,"dur":19.1,"act":"第一幕 · 原理","title":"⑨ 加权取 V，再叠加回原向量"},{"i":10,"t":181.4,"dur":21,"act":"第一幕 · 原理","title":"⑩ MLP：每个位置各自做一次变换"},{"i":11,"t":202.4,"dur":15.9,"act":"第一幕 · 原理","title":"⑪ 64 个神经元的真实激活值"},{"i":12,"t":218.3,"dur":16.7,"act":"第二幕 · 走完一次推理","title":"⑫ 同样的结构，再来一遍"},{"i":13,"t":235,"dur":15.7,"act":"第二幕 · 走完一次推理","title":"⑬ 输出头：把向量投影回词表"},{"i":14,"t":250.7,"dur":18.7,"act":"第二幕 · 走完一次推理","title":"⑭ Softmax：分数变成概率"},{"i":15,"t":269.4,"dur":17.3,"act":"第二幕 · 走完一次推理","title":"⑮ Top-p 采样：怎么挑出那个 token"},{"i":16,"t":286.7,"dur":20.9,"act":"第二幕 · 走完一次推理","title":"⑯ 自回归：把它接回去，再来一次"},{"i":17,"t":307.6,"dur":30.2,"act":"第三幕 · 这些数是真的","title":"⑰ 把中间张量一个个摊开"},{"i":18,"t":337.8,"dur":20.7,"act":"第三幕 · 这些数是真的","title":"⑱ 并且可以和独立实现对上"},{"i":19,"t":358.5,"dur":18.1,"act":"第四幕 · 它怎么学会的","title":"⑲ 训练：一个闭环，跑上千万次"},{"i":20,"t":376.6,"dur":19.1,"act":"第四幕 · 它怎么学会的","title":"⑳ 采样训练批次"},{"i":21,"t":395.7,"dur":12.9,"act":"第四幕 · 它怎么学会的","title":"㉑ 前向传播"},{"i":22,"t":408.6,"dur":22.1,"act":"第四幕 · 它怎么学会的","title":"㉒ 交叉熵损失"},{"i":23,"t":430.7,"dur":21.1,"act":"第四幕 · 它怎么学会的","title":"㉓ 反向传播：把责任分回去"},{"i":24,"t":451.8,"dur":18.2,"act":"第四幕 · 它怎么学会的","title":"㉔ 梯度裁剪：防止一步走飞"},{"i":25,"t":470,"dur":21.8,"act":"第四幕 · 它怎么学会的","title":"㉕ AdamW：真正改动权重"},{"i":26,"t":491.8,"dur":20.7,"act":"第四幕 · 它怎么学会的","title":"㉖ 一步完成，然后重复"},{"i":27,"t":512.5,"dur":23.9,"act":"尾声","title":"整个流程，到这里就闭环了"}];
+function fmt(s){ s = Math.max(0, Math.round(s||0)); return Math.floor(s/60) + ':' + String(s%60).padStart(2,'0'); }
+
+var v = document.getElementById('v'), sub = document.getElementById('sub'),
+    pp = document.getElementById('pp'), seek = document.getElementById('seek'),
+    clock = document.getElementById('clock'), sp = document.getElementById('sp');
+var SPEEDS = [1, 1.25, 1.5, 2, 0.75], si = 0;
+
+function setPP() { pp.textContent = v.paused ? '▶ 播放' : '⏸ 暂停'; pp.classList.toggle('on', !v.paused); }
+pp.onclick = function () { v.paused ? v.play() : v.pause(); };
+document.getElementById('b10').onclick = function () { v.currentTime = Math.max(0, v.currentTime - 10); };
+document.getElementById('f10').onclick = function () { v.currentTime = Math.min(v.duration, v.currentTime + 10); };
+sp.onclick = function () { si = (si + 1) % SPEEDS.length; v.playbackRate = SPEEDS[si]; sp.textContent = SPEEDS[si].toFixed(2).replace(/\.?0+$/, '') + '×'; };
+document.getElementById('fs').onclick = function () {
+  var st = document.querySelector('.stage');
+  if (document.fullscreenElement) document.exitFullscreen(); else st.requestFullscreen && st.requestFullscreen();
+};
+seek.addEventListener('input', function () { v.currentTime = seek.value / 1000; });
+function tick() {
+  if (!seek.matches(':active')) seek.value = Math.round(v.currentTime * 1000);
+  clock.textContent = fmt(v.currentTime) + ' / ' + fmt(v.duration || 0);
+  // 字幕
+  var t = v.currentTime * 1000, hit = null;
+  for (var i = 0; i < LINES.length; i++) { if (t >= LINES[i].a && t < LINES[i].z) { hit = LINES[i]; break; } }
+  sub.textContent = hit ? hit.text : '';
+  // 高亮当前章节
+  var cur = 0;
+  for (var k = 0; k < CHAPTERS.length; k++) { if (t / 1000 >= CHAPTERS[k].t) cur = k; }
+  var bs = document.querySelectorAll('.ch');
+  for (var j = 0; j < bs.length; j++) bs[j].classList.toggle('on', +bs[j].dataset.i === cur);
+}
+/* timeupdate 在暂停/程序化 seek 时不一定触发，所以再加一个 250ms 的兜底轮询 */
+v.addEventListener('timeupdate', tick);
+setInterval(tick, 250); tick();
+v.addEventListener('play', setPP); v.addEventListener('pause', setPP); setPP();
+
+var toc = document.getElementById('toc');
+toc.addEventListener('click', function (e) {
+  var b = e.target.closest('.ch'); if (!b) return;
+  v.currentTime = +b.dataset.t; v.play();
+});
+document.addEventListener('keydown', function (e) {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') { e.preventDefault(); v.paused ? v.play() : v.pause(); }
+  else if (e.code === 'ArrowLeft') v.currentTime = Math.max(0, v.currentTime - 10);
+  else if (e.code === 'ArrowRight') v.currentTime = Math.min(v.duration, v.currentTime + 10);
+  else if (e.key === 'f' || e.key === 'F') document.getElementById('fs').click();
+  else if (e.key === 's' || e.key === 'S') sp.click();
+});
+</script>
+</body>
+</html>

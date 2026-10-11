@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>大语言模型内部机制 · 3D 可视化</title>
+<style>
+  :root {
+    --paper: #f6f3ec;
+    --paper-hi: #fffdf9;
+    --ink: #2b2723;
+    --ink-2: #6b6259;
+    --ink-3: #9a9085;
+    --line: #ddd5c7;
+    --line-soft: #e8e1d5;
+    --jade: #2f7d63;
+    --jade-lo: #7fc0aa;
+    --teal: #3d8f9c;
+    --rust: #b85c38;
+    --amber: #c98a3c;
+    --shadow: 0 1px 2px rgba(43,39,35,.05), 0 8px 28px rgba(43,39,35,.07);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", -apple-system, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  #app { display: flex; height: 100vh; }
+
+  /* ---------- 左栏 ---------- */
+  #panel {
+    width: 392px; flex: 0 0 392px; height: 100%;
+    background: var(--paper-hi);
+    border-right: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    z-index: 5;
+  }
+  #panelScroll { overflow-y: auto; overflow-x: hidden; flex: 1; padding: 0 0 20px; }
+  #panelScroll::-webkit-scrollbar { width: 9px; }
+  #panelScroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 9px; border: 3px solid var(--paper-hi); }
+  #panelScroll::-webkit-scrollbar-track { background: transparent; }
+
+  header { padding: 24px 26px 18px; border-bottom: 1px solid var(--line-soft); }
+  .kicker {
+    font-size: 10.5px; letter-spacing: .16em; text-transform: uppercase;
+    color: var(--jade); font-weight: 700; margin-bottom: 9px;
+  }
+  h1 { font-size: 21px; line-height: 1.35; margin: 0 0 8px; font-weight: 700; letter-spacing: -.01em; }
+  .sub { font-size: 12.5px; line-height: 1.65; color: var(--ink-2); }
+
+  section { padding: 20px 26px; border-bottom: 1px solid var(--line-soft); }
+  .sec-h {
+    font-size: 10.5px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 700; margin-bottom: 13px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .sec-h::after { content: ''; flex: 1; height: 1px; background: var(--line-soft); }
+
+  /* 当前步骤 */
+  #stage {
+    font-size: 15.5px; font-weight: 700; line-height: 1.45; margin-bottom: 9px; color: var(--ink);
+  }
+  #desc { font-size: 12.5px; line-height: 1.75; color: var(--ink-2); }
+  #formula {
+    font-family: "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 12px; line-height: 1.6; margin-top: 12px;
+    background: #f3efe6; border: 1px solid var(--line-soft);
+    border-radius: 8px; padding: 10px 12px; color: var(--jade);
+    overflow-x: auto; white-space: nowrap;
+  }
+  #stepPill {
+    display: inline-block; margin-top: 12px; font-size: 11px;
+    color: var(--ink-2); background: var(--paper); border: 1px solid var(--line);
+    padding: 4px 10px; border-radius: 20px; font-variant-numeric: tabular-nums;
+  }
+
+  /* 训练进度 */
+  #trainTrack {
+    height: 6px; background: var(--line-soft); border-radius: 6px; overflow: hidden; margin: 4px 0 10px;
+  }
+  #trainBar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--jade-lo), var(--jade)); transition: width .2s; }
+  .rowline { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--ink-2); margin-top: 5px; }
+  .rowline b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  /* 层进度 */
+  .lp { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 12px; }
+  .lp-n { width: 38px; color: var(--ink-2); flex: 0 0 38px; }
+  .lp-bar { flex: 1; height: 5px; background: var(--line-soft); border-radius: 5px; overflow: hidden; }
+  .lp-bar i { display: block; height: 100%; width: 0%; background: var(--jade); border-radius: 5px; transition: width .12s linear; }
+  .lp-v { width: 42px; text-align: right; color: var(--ink-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+  /* 输出 */
+  #tokOut {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 16px; letter-spacing: .1em; line-height: 1.6;
+    background: #f3efe6; border: 1px solid var(--line-soft); border-radius: 8px;
+    padding: 12px 13px; color: var(--ink); word-break: break-all; min-height: 44px;
+  }
+
+  /* 控件 */
+  .ctl-row { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  button {
+    font-family: inherit; font-size: 12px; font-weight: 600;
+    padding: 7px 13px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--paper-hi); color: var(--ink-2);
+    transition: all .14s;
+  }
+  button:hover { border-color: var(--jade-lo); color: var(--jade); background: #f4f8f6; }
+  button.on { background: var(--jade); border-color: var(--jade); color: #fff; }
+  button.wide { flex: 1; }
+
+  input[type=range] {
+    -webkit-appearance: none; appearance: none; width: 100%;
+    height: 4px; border-radius: 4px; background: var(--line); outline: none; margin: 6px 0;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 15px; height: 15px;
+    border-radius: 50%; background: var(--jade); cursor: pointer; border: 2px solid var(--paper-hi);
+    box-shadow: 0 1px 3px rgba(0,0,0,.18);
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 15px; height: 15px; border-radius: 50%; background: var(--jade);
+    cursor: pointer; border: 2px solid var(--paper-hi);
+  }
+
+  .toggles { display: flex; flex-direction: column; gap: 9px; }
+  .tg { display: flex; align-items: center; gap: 9px; font-size: 12.5px; color: var(--ink-2); cursor: pointer; }
+  .tg input { accent-color: var(--jade); width: 14px; height: 14px; cursor: pointer; }
+  .lab { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--ink-2); margin: 4px 0 2px; }
+
+  .note { font-size: 11px; line-height: 1.7; color: var(--ink-3); }
+
+  /* ---------- 右侧 3D ---------- */
+  #main { flex: 1; position: relative; min-width: 0; }
+  #scene { position: absolute; inset: 0; }
+  #scene canvas { display: block; width: 100%; height: 100%; }
+
+  /* 图例 */
+  #legend {
+    position: absolute; right: 20px; bottom: 20px; z-index: 3;
+    background: rgba(255,253,249,.93); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 11px; padding: 13px 15px;
+    box-shadow: var(--shadow); font-size: 11px; color: var(--ink-2);
+  }
+  #legend .lg-h { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); font-weight: 700; margin-bottom: 9px; }
+  #legend .lg-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+  .sw { width: 13px; height: 13px; border-radius: 3.5px; flex: 0 0 13px; }
+  .ramp { width: 92px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #d8d0c2, #2f7d63); }
+
+  /* 状态角标 */
+  #badge {
+    position: absolute; left: 20px; top: 20px; z-index: 3;
+    background: rgba(255,253,249,.93); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 20px; padding: 6px 14px;
+    font-size: 11.5px; color: var(--ink-2); box-shadow: var(--shadow);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--jade); }
+  .dot.busy { background: var(--amber); animation: pulse 1.1s infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .25 } }
+
+  /* 加载遮罩 */
+  #loading {
+    position: absolute; inset: 0; z-index: 20;
+    background: var(--paper); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px;
+    transition: opacity .5s;
+  }
+  #loading.hidden { opacity: 0; pointer-events: none; }
+  .spin {
+    width: 34px; height: 34px; border-radius: 50%;
+    border: 2.5px solid var(--line); border-top-color: var(--jade);
+    animation: spin .85s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg) } }
+  #loading p { font-size: 12.5px; color: var(--ink-2); margin: 0; }
+  #loading .lbar { width: 208px; height: 4px; background: var(--line-soft); border-radius: 4px; overflow: hidden; }
+  #loading .lbar i { display: block; height: 100%; width: 0%; background: var(--jade); transition: width .25s; }
+
+  @media (max-width: 900px) {
+    #app { flex-direction: column; }
+    #panel { width: 100%; flex: 0 0 auto; max-height: 47vh; border-right: none; border-bottom: 1px solid var(--line); }
+    #main { flex: 1; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- ============ 左栏 ============ -->
+  <aside id="panel">
+    <header>
+      <div class="kicker">Transformer Forward Pass</div>
+      <h1>大语言模型内部机制<br>逐原子步骤 3D 可视化</h1>
+      <div class="sub">这不是预先编排的动画脚本 —— 页面在你的浏览器里真实训练一个 2 层微型 Transformer，再把它真实的前向传播逐格渲染出来。</div>
+    </header>
+
+    <div id="panelScroll">
+      <section>
+        <div class="sec-h">当前步骤</div>
+        <div id="stage">正在准备…</div>
+        <div id="desc">模型正在初始化。</div>
+        <div id="formula"></div>
+        <div id="stepPill">—</div>
+      </section>
+
+      <section>
+        <div class="sec-h">训练</div>
+        <div id="trainTrack"><div id="trainBar"></div></div>
+        <div class="rowline"><span id="trainTxt">等待开始</span><b id="lossTxt">—</b></div>
+      </section>
+
+      <section>
+        <div class="sec-h">层进度</div>
+        <div id="layerGrid"></div>
+      </section>
+
+      <section>
+        <div class="sec-h">当前序列</div>
+        <div id="tokOut">—</div>
+      </section>
+
+      <section>
+        <div class="sec-h">视角</div>
+        <div class="ctl-row">
+          <button data-cam="overview" class="on wide">全景</button>
+          <button data-cam="layer" class="wide">层内</button>
+          <button data-cam="matrix" class="wide">矩阵</button>
+        </div>
+        <div class="ctl-row">
+          <button data-cam="mlp" class="wide">MLP</button>
+          <button data-cam="head" class="wide">输出头</button>
+          <button data-cam="tokens" class="wide">Token</button>
+        </div>
+      </section>
+
+      <section>
+        <div class="sec-h">播放</div>
+        <div class="ctl-row">
+          <button id="play" class="on wide">⏸ 暂停</button>
+          <button id="stepBtn" class="wide">⏭ 下一步</button>
+        </div>
+        <div class="lab"><span>速度</span><b id="speedVal">1.0×</b></div>
+        <input type="range" id="speed" min="0.25" max="3" step="0.25" value="1">
+      </section>
+
+      <section>
+        <div class="sec-h">显示</div>
+        <div class="toggles">
+          <label class="tg"><input type="checkbox" id="mtx" checked> 注意力矩阵热力图</label>
+          <label class="tg"><input type="checkbox" id="heat" checked> MLP 神经元激活</label>
+          <label class="tg"><input type="checkbox" id="rm"> 减少动态效果</label>
+        </div>
+      </section>
+
+      <section>
+        <div class="sec-h">说明</div>
+        <div class="note">
+          模型：2 层 · d=32 · 4 头 · MLP 64 · 上下文 14 · 词表 12，约 2.8k 参数，AdamW 训练 1200 步。<br><br>
+          注意力连线、矩阵热力、神经元激活、输出概率全部读取自 <code>forward()</code> 的真实中间张量。温度 0.85，Top-p 0.92。
+        </div>
+      </section>
+    </div>
+  </aside>
+
+  <!-- ============ 3D ============ -->
+  <main id="main">
+    <div id="scene"></div>
+
+    <div id="badge"><span class="dot busy" id="statusDot"></span><span id="statusTxt">初始化</span></div>
+
+    <div id="legend">
+      <div class="lg-h">图例</div>
+      <div class="lg-row"><span class="sw" style="background:#7fc0aa"></span> 已有 Token</div>
+      <div class="lg-row"><span class="sw" style="background:#c98a3c"></span> 本轮新采样</div>
+      <div class="lg-row"><span class="ramp"></span> 注意力权重 低→高</div>
+      <div class="lg-row"><span class="sw" style="background:#3d8f9c"></span> Embedding 向量</div>
+      <div class="lg-row"><span class="sw" style="background:#b85c38"></span> 输出概率</div>
+    </div>
+
+    <div id="loading">
+      <div class="spin"></div>
+      <p id="loadTxt">正在训练微型 Transformer…</p>
+      <div class="lbar"><i id="loadBar"></i></div>
+    </div>
+  </main>
+</div>
+
+<script src="three.min.js"></script>
+<script src="orbit-controls.js"></script>
+<script src="model.js"></script>
+<script src="viz.js"></script>
+<script>
+  // Worker 与 file:// 协议兼容：blob 回退
+  (function () {
+    var badgeDot = document.getElementById('statusDot');
+    var badgeTxt = document.getElementById('statusTxt');
+    var loadBar = document.getElementById('loadBar');
+    var loadTxt = document.getElementById('loadTxt');
+
+    var origWorker = window.Worker;
+    if (location.protocol === 'file:') {
+      window.Worker = function (url) {
+        // file:// 下无法加载 worker.js —— 触发 onerror，让 viz 走主线程训练
+        var fake = { postMessage: function () {}, terminate: function () {}, onmessage: null, onerror: null };
+        setTimeout(function () { if (fake.onerror) fake.onerror(new Error('file://')); }, 0);
+        return fake;
+      };
+    }
+    void origWorker;
+
+    // 同步训练进度到加载遮罩
+    var iv = setInterval(function () {
+      if (!window.__viz) return;
+      var S = window.__viz.S;
+      if (S.trained) { loadBar.style.width = '100%'; clearInterval(iv); }
+      else if (S.trainProgress > 0) {
+        loadBar.style.width = (S.trainProgress * 100).toFixed(1) + '%';
+      }
+    }, 120);
+
+    var iv2 = setInterval(function () {
+      if (!window.__viz) return;
+      var S = window.__viz.S;
+      if (S.trained) {
+        badgeDot.classList.remove('busy');
+        badgeTxt.textContent = '推理中 · 第 ' + (S.step + 1) + ' 轮';
+      } else {
+        badgeTxt.textContent = '训练中 ' + (S.trainProgress * 100).toFixed(0) + '%';
+      }
+    }, 250);
+  })();
+</script>
+</body>
+</html>

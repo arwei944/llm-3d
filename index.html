@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>大语言模型科普引擎 · 3D 可视化</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ══════════ 左栏：品牌 + 模块导航 + 状态 + 图例 ══════════ -->
+  <aside id="rail">
+    <header>
+      <div class="brand">
+        <span class="brand-mark" id="brandMark"></span>
+        <span class="brand-txt">
+          <b>LLM 科普引擎</b>
+          <i>真实训练 · 真实张量 · 真实采样</i>
+        </span>
+      </div>
+    </header>
+
+    <div id="railScroll">
+      <section class="rail-sec">
+        <div class="sec-h">模块</div>
+        <div id="modTabs" class="modnav"></div>
+        <button id="cineBtn" class="wide">
+          <span class="ic-slot" id="cineIcon"></span><span id="cineLabel">讲解动画</span>
+        </button>
+        <div id="modeHint"></div>
+      </section>
+
+      <section class="rail-sec">
+        <div class="sec-h">状态</div>
+        <div id="badge" class="badge-box">
+          <span class="dot busy" id="statusDot"></span><span id="statusTxt">初始化</span>
+        </div>
+      </section>
+
+      <section class="rail-sec">
+        <div class="sec-h">图例</div>
+        <div id="legend" class="legend-box">
+          <div class="lg-row"><span class="sw" style="background:#8ecbb4"></span> Token / 激活值</div>
+          <div class="lg-row"><span class="sw" style="background:#c98a3c"></span> 目标 / 新采样</div>
+          <div class="lg-row"><span class="ramp"></span> 注意力权重 低→高</div>
+          <div class="lg-row"><span class="sw" style="background:#7a6bab"></span> 梯度范数</div>
+          <div class="lg-row"><span class="sw" style="background:#3d8f9c"></span> 权重 / Embedding</div>
+        </div>
+      </section>
+
+      <section class="rail-sec rail-keys">
+        <div class="sec-h">快捷键</div>
+        <div class="keys"><span class="ic-slot" data-ic="keys"></span><span>拖拽旋转 · 滚轮缩放 · 空格播放</span></div>
+      </section>
+    </div>
+  </aside>
+
+  <!-- ══════════ 中栏：3D 舞台 ══════════ -->
+  <main id="main">
+    <div id="scene"></div>
+
+    <div id="loading">
+      <div class="spin"></div>
+      <p id="bootTxt">正在训练微型 Transformer…</p>
+      <div class="lbar"><i id="bootBar"></i></div>
+      <p class="boot-note">浏览器里现场训练约 2.8k 参数的微型 Transformer，<br>然后把它的真实中间张量渲染出来</p>
+    </div>
+  </main>
+
+  <!-- ══════════ 右栏：控制 / 讲解 / 说明 ══════════ -->
+  <aside id="panel">
+    <div id="panelScroll">
+
+      <section id="modPanel" style="display:none"></section>
+
+      <section class="sec-step">
+        <div class="sec-h">当前步骤</div>
+        <div id="stage">准备中…</div>
+        <div id="desc"></div>
+        <div id="formula"></div>
+        <div id="stepPill">—</div>
+      </section>
+
+      <section class="sec-layers">
+        <div class="sec-h">层进度 / 训练指标</div>
+        <div id="layerGrid"></div>
+      </section>
+
+      <section class="sec-seq">
+        <div class="sec-h">当前序列</div>
+        <div id="seqBox">—</div>
+      </section>
+
+      <section class="sec-cams">
+        <div class="sec-h">视角</div>
+        <div class="ctl-row camrow" data-formode="fwd">
+          <button data-cam="overview" class="on">全景</button>
+          <button data-cam="layer">层内</button>
+          <button data-cam="matrix">矩阵</button>
+        </div>
+        <div class="ctl-row camrow" data-formode="fwd">
+          <button data-cam="mlp">MLP</button>
+          <button data-cam="head">输出头</button>
+          <button data-cam="tokens">Token</button>
+        </div>
+        <div class="ctl-row camrow" data-formode="train" style="display:none">
+          <button data-cam="overview" class="on">全景</button>
+          <button data-cam="batch">批次</button>
+          <button data-cam="forward">前向</button>
+        </div>
+        <div class="ctl-row camrow" data-formode="train" style="display:none">
+          <button data-cam="loss">损失</button>
+          <button data-cam="backward">反向</button>
+          <button data-cam="optim">优化器</button>
+        </div>
+        <div class="ctl-row camrow" data-formode="train" style="display:none">
+          <button data-cam="curve">Loss 曲线</button>
+        </div>
+        <div id="engineCams"></div>
+      </section>
+
+      <section class="sec-play">
+        <div class="sec-h">播放</div>
+        <div class="ctl-row">
+          <button id="play" class="on"><span class="ic-slot" data-ic="pause"></span><span id="playLabel">暂停</span></button>
+          <button id="stepBtn"><span class="ic-slot" data-ic="step"></span>下一步</button>
+        </div>
+        <div class="lab"><span>速度</span><b id="speedVal">1.00×</b></div>
+        <input type="range" id="speed" min="0.25" max="3" step="0.25" value="1">
+      </section>
+
+      <section class="sec-display">
+        <div class="sec-h">显示</div>
+        <div class="toggles">
+          <label class="tg"><input type="checkbox" id="mtx" checked> 注意力矩阵热力图</label>
+          <label class="tg"><input type="checkbox" id="heat" checked> MLP 神经元激活</label>
+          <label class="tg"><input type="checkbox" id="rm"> 减少动态效果</label>
+        </div>
+      </section>
+
+      <section>
+        <div class="sec-h">真实运算示例
+          <button id="retrace" class="mini-btn"><span class="ic-slot" data-ic="reset"></span>重算</button>
+        </div>
+        <div id="traceBox"><span class="muted">等待模型…</span></div>
+      </section>
+
+      <section>
+        <div class="sec-h">说明</div>
+        <div class="note">
+          模型：2 层 · d=32 · 4 头 · MLP 64 · 上下文 16 · 词表 12，约 2.8k 参数，浏览器内真实训练 900 步（下一字符准确率 8.3% → 82.6%）。<br><br>
+          <strong>推理</strong>：Embedding → RoPE → 每层 RMSNorm / QKV / 多头因果注意力 / 残差 / MLP → 输出头 → 温度 softmax → Top-p 采样 → 自回归追加。<br><br>
+          <strong>训练</strong>：采样批次 → 前向 → 交叉熵 → 反向传播（梯度柱 = 真实 ‖∂L/∂θ‖）→ 梯度裁剪 → AdamW 更新（立方体 = 真实权重）→ loss 曲线下降。<br><br>
+          <strong>采样实验室</strong>：温度 / Top-K / Top-P 实时驱动真实 forward，看概率分布与采样结果怎么变。<br><br>
+          <strong>注意力探针</strong>：选层、选头、选查询位置，逐格看真实注意力概率与分工。<br><br>
+          <strong>上下文与缓存</strong>：拖动 T，看因果掩码三角与真实 K/V 缓存墙，O(T²) 连接 vs O(T) 缓存。<br><br>
+          <strong>科普图谱</strong>：十个维度横向扩展（分词 / 语义空间 / 缩放定律 / 幻觉 / RLHF / RAG / 思维链 / 多模态 / 推理成本 / 评测）。<br><br>
+          新增模块只需调用 <code>LLMEngine.register({...})</code>，引擎自动生成导航、参数面板、相机行与主循环钩子。<br><br>
+          「真实运算示例」面板里的数字由浏览器实时计算，并与 <code>tools/trace.js</code> 在 Node 端独立算出的参考值逐项比对。
+        </div>
+      </section>
+    </div>
+  </aside>
+</div>
+
+<!-- 依赖与模块：普通 script 标签，file:// 直接双击可用，无需服务器 -->
+<script src="src/three.min.js?v=7"></script>
+<script src="src/orbit-controls.js?v=7"></script>
+<script src="src/model.js?v=7"></script>
+<script src="src/icons.js?v=7"></script>
+<script src="src/core.js?v=7"></script>
+<script src="src/engine.js?v=7"></script>
+<script src="src/viz-forward.js?v=7"></script>
+<script src="src/viz-train.js?v=7"></script>
+<script src="src/viz-explore.js?v=7"></script>
+<script src="src/viz-attn.js?v=7"></script>
+<script src="src/viz-kv.js?v=7"></script>
+<script src="src/topics.js?v=7"></script>
+<script src="src/trace.js?v=7"></script>
+<script src="data/trace.js?v=7"></script>
+<script src="src/narration.js?v=7"></script>
+<script src="src/app.js?v=7"></script>
+<script>
+  (function () {
+    // 静态图标位：data-ic 指定的图标统一注入
+    document.querySelectorAll('.ic-slot[data-ic]').forEach(function (el) {
+      el.innerHTML = window.LLMIcons[el.dataset.ic](el.dataset.size ? +el.dataset.size : 16);
+    });
+    var mark = document.getElementById('brandMark');
+    if (mark) mark.innerHTML = window.LLMIcons.cube(22);
+    var ci = document.getElementById('cineIcon');
+    if (ci) ci.innerHTML = window.LLMIcons.film(16);
+
+    var dot = document.getElementById('statusDot'), txt = document.getElementById('statusTxt');
+    setInterval(function () {
+      var A = window.__app;
+      if (!A) return;
+      if (!A.bootDone) { txt.textContent = '训练中…'; return; }
+      dot.classList.remove('busy');
+      if (A.mode === 'train' && A.trainModel && A.trainModel._adam) txt.textContent = '训练中 · 迭代 ' + A.trainModel._adam.t;
+      else if (A.mode === 'fwd') txt.textContent = '推理中';
+      else txt.textContent = '互动中 · ' + (A.mode || '');
+    }, 300);
+  })();
+</script>
+</body>
+</html>
